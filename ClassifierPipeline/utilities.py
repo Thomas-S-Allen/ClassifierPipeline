@@ -317,8 +317,6 @@ def list_to_output_message(input_list):
     -------
     ClassifyResponseRecordList
         Message where each element of ``classify_requests`` is populated.  
-        **Caution:** The current implementation assigns ``collections`` to
-        ``entry.status`` (overwriting ``status``), which is likely a bug.
     """
 
     message = ClassifyResponseRecordList()
@@ -338,9 +336,9 @@ def list_to_output_message(input_list):
         except:
             entry.status = None
         try:
-            entry.status = item.get('collections')
+            entry.collections = item.get('collections')
         except:
-            entry.status = None
+            entry.collections = None
 
     return message
      
