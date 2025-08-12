@@ -22,17 +22,30 @@ logger = setup_logging('utilities.py', proj_home=proj_home,
 
 def classify_record_from_scores(record):
     """
-    Classify a record after it has been scored. 
+    Classify a scored record into one or more collections based on thresholds.
 
     Parameters
     ----------
-    record : dictionary (required) (default=None) Dictionary with the following
-        keys: bibcode, text, validate, categories, scores, and model information
+    record : dict
+        Dictionary containing at least the keys:
+        ``categories`` (list[str]), ``scores`` (list[float]).
+        Optionally includes metadata such as ``bibcode``, ``text``, ``validate``,
+        and model information. Scores must be aligned with categories by index.
 
     Returns
     -------
-    record : dictionary with the following keys: bibcode, text, validate, categories,
-        scores, model information, and Collections
+    dict
+        The input ``record`` augmented with:
+        ``collections`` (list[str]) and ``collection_scores`` (list[float, rounded to 2 dp]).
+
+    Notes
+    -----
+    - Thresholds are read from ``config['CLASSIFICATION_THRESHOLDS']`` and zipped
+      against ``scores``.
+    - If ``config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] == 'active'`` and the
+      "Other" category meets its threshold, the Earth Science score is compared to
+      ``config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD']``; if exceeded, the
+      "Other" selection is removed and "Earth Science" is added.
     """
 
     logger.info('Classify Record From Scores')
@@ -62,15 +75,25 @@ def classify_record_from_scores(record):
     record['collection_scores'] = [score for score, threshold in zip(scores, meet_threshold) if threshold is True]
     record['collection_scores'] = [round(score, 2) for score in record['collection_scores']]
 
-
     return record
-
 
 
 def prepare_output_file(output_path):
     """
-    Prepares an output file
-    """
+    Create/overwrite a tab-delimited results file with a fixed header.
+
+    Parameters
+    ----------
+    output_path : str or os.PathLike
+        Target file path. Existing file is truncated.
+
+    Side Effects
+    ------------
+    Writes a single header row with columns:
+    ``['bibcode','scix_id','title','abstract','run_id','categories','scores',
+    'collections','collection_scores','earth_science_adjustment','override']``.
+    """ 
+
     logger.info('Preparing output file - utilities.py')
 
     header = ['bibcode','scix_id','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
@@ -83,16 +106,20 @@ def prepare_output_file(output_path):
 
 def check_is_allowed_category(categories_list):
     """
-    Check if provided categories are in list of approved categories
+    Check that all requested categories are present in the configured allowlist.
 
     Parameters
     ----------
-    categories_list : list (required) list of categories to check if allowed
+    categories_list : list[str]
+        Categories to validate (case-insensitive).
 
     Returns
-    ----------
-    True if all categories in approved
+    -------
+    bool
+        ``True`` iff every element of ``categories_list`` appears in
+        ``config['ALLOWED_CATEGORIES']`` (case-insensitive).
     """
+
     logger.info(f"Cheking allowed categories for {categories_list}")
     allowed = config.get('ALLOWED_CATEGORIES')
     allowed = [s.lower() for s in allowed]
@@ -110,17 +137,18 @@ def check_is_allowed_category(categories_list):
 
 def return_fake_data(record):
     """
-    Return fake data as a stand in for classifier results.  Use for debugging.
+    Populate a record with deterministic fake categories/scores and model metadata.
 
     Parameters
     ----------
-    record : dict (required) Dictionary of record information
-    records_path : str (required) (default=None) Path to a .csv file of records
+    record : dict
+        Mutable dictionary to augment.
 
     Returns
     -------
-    records : dictionary with the following keys: bibcode, text,
-                categories, scores, and model information
+    dict
+        The same dict with keys ``categories``, ``scores``, ``model``, and
+        ``postprocessing`` added based on the current configuration.
     """
 
     
@@ -141,16 +169,26 @@ def return_fake_data(record):
 
     return record
 
+
 def filter_allowed_fields(input_dict, allowed_fields=None,response=False):
     """
-    Return a new dictionary containing only the keys from input_dict 
-    that are part of the ClassifyRequestRecord protobuf definition.
-    
-    :param input_dict: The original dictionary to filter.
-    :param allowed_fields: A set of field names that are allowed.
-    :param output: Boolean (False): True if ClassifyResponseRecord is desired output
-    :return: A filtered dictionary with only allowed keys.
+    Filter keys to those supported by the protobuf schema helpers.
+
+    Parameters
+    ----------
+    input_dict : dict
+        Dictionary to filter.
+    allowed_fields : set[str], optional
+        Explicit allowlist; if omitted, a default set is chosen based on ``response``.
+    response : bool, default False
+        If ``True``, the response-oriented field set is used.
+
+    Returns
+    -------
+    dict
+        A new dict containing only allowed keys.
     """
+
     if allowed_fields is None:
         if response is False:
             allowed_fields = {'bibcode', 'scix_id', 'status', 'title', 'abstract', 
@@ -164,17 +202,41 @@ def filter_allowed_fields(input_dict, allowed_fields=None,response=False):
 
 def dict_to_ClassifyRequestRecord(input_dict):
     """
-    Convert a dictionary to a protobuf message'
+    Convert a Python dict into a ``ClassifyRequestRecord`` protobuf message.
+
+    The input is first filtered via :func:`filter_allowed_fields`.
+
+    Parameters
+    ----------
+    input_dict : dict
+        Request fields.
+
+    Returns
+    -------
+    ClassifyRequestRecord
+        Protobuf message instance.
     """
+
     input_dict = filter_allowed_fields(input_dict)
 
     request_message = ClassifyRequestRecord()
     message = ParseDict(input_dict, request_message)
     return message
 
+
 def list_to_ClassifyRequestRecordList(input_list):
     """
-    Convert a list of dictionaries to a protobuf message'
+    Convert a list of request dicts into a ``ClassifyRequestRecordList`` message.
+
+    Parameters
+    ----------
+    input_list : list[dict]
+        Each element is filtered via :func:`filter_allowed_fields`.
+
+    Returns
+    -------
+    ClassifyRequestRecordList
+        Protobuf list message with ``classify_requests`` populated.
     """
 
     input_list = list(map(lambda d: filter_allowed_fields(d), input_list))
@@ -193,17 +255,39 @@ def list_to_ClassifyRequestRecordList(input_list):
 
 def dict_to_ClassifyResponseRecord(input_dict):
     """
-    Convert a list of dictionaries to a protobuf message'
+    Convert a response dict into a ``ClassifyResponseRecord`` protobuf message.
+
+    Parameters
+    ----------
+    input_dict : dict
+        Response fields (filtered to response-allowed keys).
+
+    Returns
+    -------
+    ClassifyResponseRecord
+        Protobuf message instance.
     """
+
     input_dict = filter_allowed_fields(input_dict, response=True)
 
     request_message = ClassifyResponseRecord()
     message = ParseDict(input_dict, request_message)
     return message
 
+
 def list_to_ClassifyResponseRecordList(input_list):
     """
-    Convert a list of dictionaries to a protobuf message'
+    Convert a list of response dicts into a ``ClassifyResponseRecordList`` message.
+
+    Parameters
+    ----------
+    input_list : list[dict]
+        Each element is filtered to response-allowed keys.
+
+    Returns
+    -------
+    ClassifyResponseRecordList
+        Protobuf list message with ``classifyResponses`` populated.
     """
 
     input_list = list(map(lambda d: filter_allowed_fields(d, response=True), input_list))
@@ -221,9 +305,20 @@ def list_to_ClassifyResponseRecordList(input_list):
 
 def list_to_output_message(input_list):
     """
-    Convert a list of dictionaries to a protobuf message to return to 
-    the Master Pipeline
+    Convert a list of dictionaries into a ``ClassifyResponseRecordList`` for the
+    master pipeline.
 
+    Parameters
+    ----------
+    input_list : list[dict]
+        Each item may include ``bibcode``, ``status``, and ``collections``.
+
+    Returns
+    -------
+    ClassifyResponseRecordList
+        Message where each element of ``classify_requests`` is populated.  
+        **Caution:** The current implementation assigns ``collections`` to
+        ``entry.status`` (overwriting ``status``), which is likely a bug.
     """
 
     message = ClassifyResponseRecordList()
@@ -252,7 +347,17 @@ def list_to_output_message(input_list):
 
 def classifyRequestRecordList_to_list(message):
     """
-    Convert a protobuf ClassifyRequestRecordList to a list of dictionaries.
+    Convert ``ClassifyRequestRecordList`` into a list of Python dicts.
+
+    Parameters
+    ----------
+    message : ClassifyRequestRecordList
+        Source message with ``classify_requests``.
+
+    Returns
+    -------
+    list[dict]
+        One dict per request, via ``MessageToDict(..., preserving_proto_field_name=True)``.
     """
 
     logger.info(f'Converting message to list: {message}')
@@ -269,16 +374,18 @@ def classifyRequestRecordList_to_list(message):
 
 def check_identifier(identifier):
     """
-    Determine form of identifier, bibcode or ScixID
+    Determine whether an identifier is a SciX ID (``scix:`` form) or a bibcode.
 
     Parameters
     ----------
-    identifier - str : either a bibcode or SciX ID - eventually SciX ID will 
-    be primary identifier
+    identifier : str
+        Candidate identifier. Must be length 19 to be considered.
 
     Returns
-    ----------
-    string or None: either 'bibcode' or 'scix_id' or None if fails
+    -------
+    {"scix_id", "bibcode"} or None
+        ``"scix_id"`` if it matches ``scix:XXXX-XXXX-XXXX`` (alphanumeric groups),
+        ``"bibcode"`` if length is 19 but not a SciX pattern, else ``None``.
     """
 
     identifier = str(identifier)
