@@ -298,7 +298,6 @@ class ClassifierDbUi(tk.Tk):
         self.ads_client = ADSClient()
         self.records_by_item = {}
         self.abstract_cache = {}
-        self.category_buttons = {}
 
         self.host_var = tk.StringVar(value=os.getenv("PGHOST", "localhost"))
         self.port_var = tk.StringVar(value=os.getenv("PGPORT", "5432"))
@@ -407,13 +406,11 @@ class ClassifierDbUi(tk.Tk):
         button_wrap = ttk.Frame(detail_frame)
         button_wrap.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         for idx, category in enumerate(ALLOWED_CATEGORIES):
-            button = ttk.Button(
+            ttk.Button(
                 button_wrap,
                 text=category,
                 command=lambda value=category: self._apply_single_category(value),
-            )
-            button.grid(row=idx // 4, column=idx % 4, sticky="ew", padx=2, pady=2)
-            self.category_buttons[category] = button
+            ).grid(row=idx // 4, column=idx % 4, sticky="ew", padx=2, pady=2)
             button_wrap.columnconfigure(idx % 4, weight=1)
 
         ttk.Button(detail_frame, text="Choose Multiple...", command=self._open_multi_select).grid(
@@ -426,11 +423,15 @@ class ClassifierDbUi(tk.Tk):
         text_frame = ttk.Frame(detail_frame)
         text_frame.grid(row=4, column=0, columnspan=2, sticky="nsew")
         text_frame.rowconfigure(1, weight=1)
+        text_frame.rowconfigure(3, weight=1)
         text_frame.columnconfigure(0, weight=1)
 
-        ttk.Label(text_frame, text="Abstract").grid(row=0, column=0, sticky="w")
-        self.abstract_text = tk.Text(text_frame, height=12, wrap="word")
-        self.abstract_text.grid(row=1, column=0, sticky="nsew")
+        ttk.Label(text_frame, text="Scores").grid(row=0, column=0, sticky="w")
+        self.scores_text = tk.Text(text_frame, height=9, wrap="word")
+        self.scores_text.grid(row=1, column=0, sticky="nsew")
+        ttk.Label(text_frame, text="Abstract").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.abstract_text = tk.Text(text_frame, height=9, wrap="word")
+        self.abstract_text.grid(row=3, column=0, sticky="nsew")
 
     def _connect(self):
         try:
@@ -519,18 +520,16 @@ class ClassifierDbUi(tk.Tk):
             self.records_by_item[item_id] = row
 
         self.collection_label.config(text=f"Loaded {len(rows)} rows")
+        self._set_text(self.scores_text, "")
         self._set_text(self.abstract_text, "")
-        self._reset_category_buttons()
 
     def _on_row_selected(self, _event):
         selected = self.tree.selection()
         if not selected:
             return
         row = self.records_by_item[selected[0]]
-        scores_map = self._extract_scores_map(row.get("scores"))
-        collection = row.get("collection") or []
-        override = row.get("override") or []
-        self._update_category_buttons(scores_map, collection, override)
+        scores_text = self._format_scores(row.get("scores"))
+        self._set_text(self.scores_text, scores_text)
         bibcode = row.get("bibcode")
         abstract = self.abstract_cache.get(bibcode, "")
         if not abstract:
@@ -547,6 +546,8 @@ class ClassifierDbUi(tk.Tk):
             abstract or "(No abstract returned from ADS for this bibcode.)",
         )
 
+        collection = row.get("collection") or []
+        override = row.get("override") or []
         self.collection_label.config(
             text=f"Current collection: {collection}    Latest override: {override}"
         )
@@ -559,13 +560,13 @@ class ClassifierDbUi(tk.Tk):
         widget.configure(state="disabled")
 
     @staticmethod
-    def _extract_scores_map(raw_scores):
+    def _format_scores(raw_scores):
         if not raw_scores:
-            return {}
+            return "(No scores found.)"
         try:
             score_obj = json.loads(raw_scores)
         except Exception:
-            return {}
+            return str(raw_scores)
 
         scores_map = {}
         if isinstance(score_obj, dict):
@@ -580,30 +581,13 @@ class ClassifierDbUi(tk.Tk):
                 }
 
         if isinstance(scores_map, dict):
-            return scores_map
-        return {}
-
-    def _reset_category_buttons(self):
-        for category, button in self.category_buttons.items():
-            button.config(text=category)
-
-    def _update_category_buttons(self, scores_map, collection, override):
-        collection_set = set(collection or [])
-        override_set = set(override or [])
-        for category, button in self.category_buttons.items():
-            score = scores_map.get(category)
-            tags = []
-            if category in collection_set:
-                tags.append("C")
-            if category in override_set:
-                tags.append("O")
-
-            label = category
-            if score is not None:
-                label += f"\n{score:.4f}"
-            if tags:
-                label += f" [{' / '.join(tags)}]"
-            button.config(text=label)
+            if not scores_map:
+                return "(No category scores found.)"
+            return "\n".join(
+                f"{name}: {value:.6f}"
+                for name, value in sorted(scores_map.items(), key=lambda kv: kv[1], reverse=True)
+            )
+        return "(No category scores found.)"
 
     def _selected_row(self):
         selected = self.tree.selection()
