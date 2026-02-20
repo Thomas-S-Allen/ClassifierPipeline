@@ -349,13 +349,16 @@ class ClassifierDbUi(tk.Tk):
         self.client = DatabaseClient()
         self.ads_client = ADSClient()
         self.records_by_item = {}
+        self.current_rows = []
         self.abstract_cache = {}
         self.category_checks = {}
         self.category_vars = {}
+        self.sort_column = None
+        self.sort_reverse = False
 
         self.host_var = tk.StringVar(value=os.getenv("PGHOST", "localhost"))
         self.port_var = tk.StringVar(value=os.getenv("PGPORT", "5432"))
-        self.db_var = tk.StringVar(value=os.getenv("PGDATABASE", "classifier_db"))
+        self.db_var = tk.StringVar(value=os.getenv("PGDATABASE", "classifier_pipeline"))
         self.user_var = tk.StringVar(value=os.getenv("PGUSER", ""))
         self.password_var = tk.StringVar(value=os.getenv("PGPASSWORD", ""))
         self.ads_token_var = tk.StringVar(
@@ -366,6 +369,7 @@ class ClassifierDbUi(tk.Tk):
         self.run_id_var = tk.StringVar()
         self.bibcode_term_var = tk.StringVar()
         self.limit_var = tk.StringVar(value="200")
+        self.score_category_var = tk.StringVar(value=ALLOWED_CATEGORIES[0])
         self.validated_var = tk.BooleanVar(value=True)
 
         self._build_layout()
@@ -399,7 +403,7 @@ class ClassifierDbUi(tk.Tk):
 
         query_frame = ttk.LabelFrame(self, text="Query", padding=8)
         query_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=4)
-        query_frame.columnconfigure(10, weight=1)
+        query_frame.columnconfigure(12, weight=1)
 
         ttk.Label(query_frame, text="Preset").grid(row=0, column=0, padx=(0, 4))
         self.query_combo = ttk.Combobox(
@@ -416,23 +420,35 @@ class ClassifierDbUi(tk.Tk):
         ttk.Entry(query_frame, textvariable=self.bibcode_term_var, width=18).grid(row=0, column=5, padx=(0, 10))
         ttk.Label(query_frame, text="Limit").grid(row=0, column=6, padx=(0, 4))
         ttk.Entry(query_frame, textvariable=self.limit_var, width=7).grid(row=0, column=7, padx=(0, 10))
-        ttk.Button(query_frame, text="Run Query", command=self._run_query).grid(row=0, column=8, padx=(0, 10))
-        ttk.Label(query_frame, text="Select a row to inspect and update collections.").grid(row=0, column=10, sticky="e")
+        ttk.Label(query_frame, text="Score category").grid(row=0, column=8, padx=(0, 4))
+        score_combo = ttk.Combobox(
+            query_frame,
+            textvariable=self.score_category_var,
+            values=ALLOWED_CATEGORIES,
+            width=22,
+            state="readonly",
+        )
+        score_combo.grid(row=0, column=9, padx=(0, 10))
+        score_combo.bind("<<ComboboxSelected>>", self._on_score_category_changed)
+        ttk.Button(query_frame, text="Run Query", command=self._run_query).grid(row=0, column=10, padx=(0, 10))
+        ttk.Label(query_frame, text="Select a row to inspect and update collections.").grid(row=0, column=12, sticky="e")
 
         list_frame = ttk.LabelFrame(self, text="Records", padding=8)
         list_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=4)
         list_frame.rowconfigure(0, weight=1)
         list_frame.columnconfigure(0, weight=1)
 
-        columns = ("bibcode", "title", "run_id", "validated", "collection")
+        columns = ("bibcode", "title", "selected_score", "run_id", "validated", "collection")
         self.tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=18)
-        self.tree.heading("bibcode", text="Bibcode")
-        self.tree.heading("title", text="Title")
-        self.tree.heading("run_id", text="run_id")
-        self.tree.heading("validated", text="validated")
-        self.tree.heading("collection", text="collection")
+        self.tree.heading("bibcode", text="Bibcode", command=lambda: self._sort_tree_by_column("bibcode"))
+        self.tree.heading("title", text="Title", command=lambda: self._sort_tree_by_column("title"))
+        self.tree.heading("selected_score", text="Score", command=lambda: self._sort_tree_by_column("selected_score"))
+        self.tree.heading("run_id", text="run_id", command=lambda: self._sort_tree_by_column("run_id"))
+        self.tree.heading("validated", text="validated", command=lambda: self._sort_tree_by_column("validated"))
+        self.tree.heading("collection", text="collection", command=lambda: self._sort_tree_by_column("collection"))
         self.tree.column("bibcode", width=170, stretch=False)
-        self.tree.column("title", width=650, stretch=True)
+        self.tree.column("title", width=560, stretch=True)
+        self.tree.column("selected_score", width=90, stretch=False, anchor="e")
         self.tree.column("run_id", width=90, stretch=False)
         self.tree.column("validated", width=90, stretch=False)
         self.tree.column("collection", width=260, stretch=True)
@@ -558,24 +574,8 @@ class ClassifierDbUi(tk.Tk):
                     f"Could not fetch titles from ADS API. Showing rows without ADS titles.\n\n{exc}",
                 )
 
-        self.records_by_item.clear()
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        for row in rows:
-            collection_text = ", ".join(row["collection"]) if row.get("collection") else ""
-            item_id = self.tree.insert(
-                "",
-                "end",
-                values=(
-                    row.get("bibcode") or "",
-                    row.get("title") or "",
-                    row.get("run_id"),
-                    bool(row.get("validated")),
-                    collection_text,
-                ),
-            )
-            self.records_by_item[item_id] = row
+        self.current_rows = list(rows)
+        self._render_tree_rows(self.current_rows)
 
         self.collection_label.config(text=f"Loaded {len(rows)} rows")
         self._set_text(self.scores_text, "")
@@ -623,6 +623,76 @@ class ClassifierDbUi(tk.Tk):
         widget.delete("1.0", "end")
         widget.insert("1.0", content)
         widget.configure(state="disabled")
+
+    def _render_tree_rows(self, rows):
+        self.records_by_item.clear()
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        selected_category = self.score_category_var.get()
+        for row in rows:
+            collection_text = ", ".join(row["collection"]) if row.get("collection") else ""
+            score_map = self._extract_scores_map(row.get("scores"))
+            raw_score = score_map.get(selected_category)
+            score_text = ""
+            try:
+                if raw_score is not None:
+                    score_text = f"{float(raw_score):.2f}"
+            except (TypeError, ValueError):
+                score_text = ""
+
+            item_id = self.tree.insert(
+                "",
+                "end",
+                values=(
+                    row.get("bibcode") or "",
+                    row.get("title") or "",
+                    score_text,
+                    row.get("run_id"),
+                    bool(row.get("validated")),
+                    collection_text,
+                ),
+            )
+            self.records_by_item[item_id] = row
+
+        if self.sort_column:
+            self._sort_tree_by_column(self.sort_column, toggle=False)
+
+    def _on_score_category_changed(self, _event=None):
+        if self.current_rows:
+            self._render_tree_rows(self.current_rows)
+
+    def _sort_tree_by_column(self, col, toggle=True):
+        if toggle:
+            if self.sort_column == col:
+                self.sort_reverse = not self.sort_reverse
+            else:
+                self.sort_column = col
+                self.sort_reverse = False
+        elif not self.sort_column:
+            self.sort_column = col
+
+        rows = [(self.tree.set(item, col), item) for item in self.tree.get_children("")]
+
+        def sort_key(pair):
+            value = pair[0]
+            if col == "run_id":
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return float("-inf")
+            if col == "validated":
+                return str(value).lower() in {"1", "true", "yes"}
+            if col == "selected_score":
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return float("-inf")
+            return str(value).lower()
+
+        rows.sort(key=sort_key, reverse=self.sort_reverse)
+        for index, (_, item) in enumerate(rows):
+            self.tree.move(item, "", index)
 
     @staticmethod
     def _extract_scores_map(raw_scores):
