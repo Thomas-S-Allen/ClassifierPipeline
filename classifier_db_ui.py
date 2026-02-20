@@ -3,12 +3,14 @@
 
 import json
 import os
+import ast
 import tkinter as tk
 from dataclasses import dataclass
 from tkinter import messagebox, ttk
 
 import psycopg2
 import requests
+import yaml
 from psycopg2.extras import RealDictCursor
 
 
@@ -110,6 +112,7 @@ class DatabaseClient:
             SELECT
                 s.id AS score_id,
                 s.bibcode,
+                s.scix_id,
                 s.run_id,
                 s.scores,
                 {title_expr},
@@ -124,7 +127,9 @@ class DatabaseClient:
                 FROM final_collection
                 WHERE score_id = s.id
                     OR (score_id IS NULL AND bibcode = s.bibcode)
-                ORDER BY created DESC
+                ORDER BY
+                    CASE WHEN score_id = s.id THEN 0 ELSE 1 END,
+                    created DESC
                 LIMIT 1
             ) fc ON TRUE
             LEFT JOIN LATERAL (
@@ -173,13 +178,26 @@ class DatabaseClient:
         final_collection_id,
         score_id,
         bibcode,
+        scix_id,
         collection,
         validated,
     ):
         if not self.conn:
             raise RuntimeError("No database connection.")
         with self.conn.cursor() as cur:
-            if final_collection_id:
+            updated = 0
+            if score_id:
+                cur.execute(
+                    """
+                    UPDATE final_collection
+                    SET collection = %s, validated = %s
+                    WHERE score_id = %s
+                    """,
+                    (collection, validated, score_id),
+                )
+                updated = cur.rowcount
+
+            if updated == 0 and final_collection_id:
                 cur.execute(
                     """
                     UPDATE final_collection
@@ -188,13 +206,47 @@ class DatabaseClient:
                     """,
                     (collection, validated, final_collection_id),
                 )
-            else:
+                updated = cur.rowcount
+
+            if updated == 0:
                 cur.execute(
                     """
                     INSERT INTO final_collection (bibcode, score_id, collection, validated)
                     VALUES (%s, %s, %s, %s)
                     """,
                     (bibcode, score_id, collection, validated),
+                )
+
+            override_updated = 0
+            if scix_id:
+                cur.execute(
+                    """
+                    UPDATE overrides
+                    SET override = %s
+                    WHERE scix_id = %s
+                    """,
+                    (collection, scix_id),
+                )
+                override_updated = cur.rowcount
+
+            if override_updated == 0 and bibcode:
+                cur.execute(
+                    """
+                    UPDATE overrides
+                    SET override = %s
+                    WHERE bibcode = %s
+                    """,
+                    (collection, bibcode),
+                )
+                override_updated = cur.rowcount
+
+            if override_updated == 0:
+                cur.execute(
+                    """
+                    INSERT INTO overrides (bibcode, scix_id, override)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (bibcode, scix_id, collection),
                 )
         self.conn.commit()
 
@@ -298,6 +350,8 @@ class ClassifierDbUi(tk.Tk):
         self.ads_client = ADSClient()
         self.records_by_item = {}
         self.abstract_cache = {}
+        self.category_checks = {}
+        self.category_vars = {}
 
         self.host_var = tk.StringVar(value=os.getenv("PGHOST", "localhost"))
         self.port_var = tk.StringVar(value=os.getenv("PGPORT", "5432"))
@@ -406,17 +460,21 @@ class ClassifierDbUi(tk.Tk):
         button_wrap = ttk.Frame(detail_frame)
         button_wrap.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         for idx, category in enumerate(ALLOWED_CATEGORIES):
-            ttk.Button(
+            var = tk.BooleanVar(value=False)
+            check = ttk.Checkbutton(
                 button_wrap,
                 text=category,
-                command=lambda value=category: self._apply_single_category(value),
-            ).grid(row=idx // 4, column=idx % 4, sticky="ew", padx=2, pady=2)
+                variable=var,
+            )
+            check.grid(row=idx // 4, column=idx % 4, sticky="w", padx=2, pady=2)
+            self.category_checks[category] = check
+            self.category_vars[category] = var
             button_wrap.columnconfigure(idx % 4, weight=1)
 
-        ttk.Button(detail_frame, text="Choose Multiple...", command=self._open_multi_select).grid(
+        ttk.Button(detail_frame, text="Submit Selection", command=self._submit_selected_categories).grid(
             row=3, column=0, sticky="w", pady=(0, 8)
         )
-        ttk.Button(detail_frame, text="Clear Collection", command=self._clear_collection).grid(
+        ttk.Button(detail_frame, text="Clear Selection", command=self._clear_selection_only).grid(
             row=3, column=1, sticky="e", pady=(0, 8)
         )
 
@@ -522,13 +580,20 @@ class ClassifierDbUi(tk.Tk):
         self.collection_label.config(text=f"Loaded {len(rows)} rows")
         self._set_text(self.scores_text, "")
         self._set_text(self.abstract_text, "")
+        self._reset_category_controls()
 
     def _on_row_selected(self, _event):
         selected = self.tree.selection()
         if not selected:
             return
         row = self.records_by_item[selected[0]]
-        scores_text = self._format_scores(row.get("scores"))
+        scores_map = self._extract_scores_map(row.get("scores"))
+        self._update_category_controls(
+            scores_map=scores_map,
+            collection=row.get("collection") or [],
+            override=row.get("override") or [],
+        )
+        scores_text = self._format_scores(scores_map)
         self._set_text(self.scores_text, scores_text)
         bibcode = row.get("bibcode")
         abstract = self.abstract_cache.get(bibcode, "")
@@ -560,34 +625,61 @@ class ClassifierDbUi(tk.Tk):
         widget.configure(state="disabled")
 
     @staticmethod
-    def _format_scores(raw_scores):
+    def _extract_scores_map(raw_scores):
         if not raw_scores:
-            return "(No scores found.)"
+            return {}
+        score_obj = None
         try:
             score_obj = json.loads(raw_scores)
         except Exception:
-            return str(raw_scores)
+            try:
+                score_obj = ast.literal_eval(raw_scores)
+            except Exception:
+                try:
+                    # Handles payloads with unquoted keys (valid YAML, not valid JSON),
+                    # e.g. {scores: {astrophysics: 0.95, Text Garbage: 0.01}, ...}
+                    score_obj = yaml.safe_load(raw_scores)
+                except Exception:
+                    return {}
 
-        scores_map = {}
-        if isinstance(score_obj, dict):
-            if isinstance(score_obj.get("scores"), dict):
-                scores_map = score_obj["scores"]
-            else:
-                # Fallback in case scores are already a category->score mapping.
-                scores_map = {
-                    key: value
-                    for key, value in score_obj.items()
-                    if isinstance(value, (int, float))
-                }
+        if isinstance(score_obj, dict) and isinstance(score_obj.get("scores"), dict):
+            return score_obj["scores"]
+        return {}
 
-        if isinstance(scores_map, dict):
-            if not scores_map:
-                return "(No category scores found.)"
-            return "\n".join(
-                f"{name}: {value:.6f}"
-                for name, value in sorted(scores_map.items(), key=lambda kv: kv[1], reverse=True)
-            )
-        return "(No category scores found.)"
+    @staticmethod
+    def _format_scores(scores_map):
+        if not scores_map:
+            return "(No category scores found.)"
+        return "\n".join(
+            f"{name}: {float(value):.2f}"
+            for name, value in sorted(scores_map.items(), key=lambda kv: float(kv[1]), reverse=True)
+        )
+
+    def _reset_category_controls(self):
+        for category, check in self.category_checks.items():
+            self.category_vars[category].set(False)
+            check.config(text=category)
+
+    def _update_category_controls(self, scores_map, collection, override):
+        collection_set = set(collection or [])
+        override_set = set(override or [])
+        for category, check in self.category_checks.items():
+            raw_score = scores_map.get(category, 0.0)
+            try:
+                score = float(raw_score)
+            except (TypeError, ValueError):
+                score = 0.0
+            tags = []
+            if category in collection_set:
+                tags.append("C")
+            if category in override_set:
+                tags.append("O")
+
+            label = f"{category}\n{score:.2f}"
+            if tags:
+                label += f" [{' / '.join(tags)}]"
+            self.category_vars[category].set(category in collection_set)
+            check.config(text=label)
 
     def _selected_row(self):
         selected = self.tree.selection()
@@ -596,23 +688,15 @@ class ClassifierDbUi(tk.Tk):
             return None
         return self.records_by_item[selected[0]]
 
-    def _apply_single_category(self, category):
-        self._update_selected_collection([category])
+    def _submit_selected_categories(self):
+        selected_categories = [
+            category for category, var in self.category_vars.items() if var.get()
+        ]
+        self._update_selected_collection(selected_categories)
 
-    def _clear_collection(self):
-        self._update_selected_collection([])
-
-    def _open_multi_select(self):
-        row = self._selected_row()
-        if row is None:
-            return
-
-        initial = row.get("collection") or []
-        dialog = CategoryDialog(self, initial)
-        self.wait_window(dialog)
-        if dialog.result is None:
-            return
-        self._update_selected_collection(dialog.result)
+    def _clear_selection_only(self):
+        for var in self.category_vars.values():
+            var.set(False)
 
     def _update_selected_collection(self, collection):
         row = self._selected_row()
@@ -629,6 +713,7 @@ class ClassifierDbUi(tk.Tk):
                 final_collection_id=row.get("final_collection_id"),
                 score_id=row.get("score_id"),
                 bibcode=row.get("bibcode"),
+                scix_id=row.get("scix_id"),
                 collection=collection,
                 validated=bool(self.validated_var.get()),
             )
