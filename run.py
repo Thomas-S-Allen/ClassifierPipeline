@@ -368,7 +368,7 @@ if __name__ == '__main__':
             # request.update({'operation_step' : 'classify'})
             request['scix_id'] = f'scix:0000-0000-000{index}'
             request['operation_step'] = 'classify'
-            request['override'] = ['Astronomy', 'Earth Science']
+            request['override'] = ['Astronomy', 'earthscience']
             print(request)
 
         print()

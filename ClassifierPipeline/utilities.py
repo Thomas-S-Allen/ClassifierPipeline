@@ -46,7 +46,7 @@ def classify_record_from_scores(record):
     Post-process a classified record based on configured thresholds.
 
     Applies classification thresholds from the config file and optionally 
-    performs additional Earth Science reclassification logic.
+    performs additional earthscience reclassification logic.
 
     Parameters
     ----------
@@ -78,16 +78,16 @@ def classify_record_from_scores(record):
 
     meet_threshold = [score > threshold for score, threshold in zip(scores, thresholds)]
 
-    # Extra step to check for "Earth Science" articles miscategorized as "Other"
+    # Extra step to check for "earthscience" articles miscategorized as "Other"
     # This is expected to be less neccessary with improved training data
     if config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] == 'active':
-        logger.info('Additional Earth Science Processing')
+        logger.info('Additional earthscience Processing')
         if meet_threshold[categories.index('Other')] is True:
-            # If Earth Science score above additional threshold
-            if scores[categories.index('Earth Science')] \
+            # If earthscience score above additional threshold
+            if scores[categories.index('earthscience')] \
                     > config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD']:
                 meet_threshold[categories.index('Other')] = False
-                meet_threshold[categories.index('Earth Science')] = True
+                meet_threshold[categories.index('earthscience')] = True
 
     record['collections'] = [category for category, threshold in zip(categories, meet_threshold) if threshold is True]
     record['collection_scores'] = [score for score, threshold in zip(scores, meet_threshold) if threshold is True]
@@ -213,7 +213,7 @@ def return_fake_data(record):
     
     logger.info('Retruning Fake data')
 
-    record['categories'] = ["Astronomy", "Heliophysics", "Planetary Science", "Earth Science", "NASA-funded Biophysics", "Other Physics", "Other", "Text Garbage"]
+    record['categories'] = ["Astronomy", "Heliophysics", "Planetary Science", "earthscience", "NASA-funded Biophysics", "Other Physics", "Other", "Text Garbage"]
     record['scores'] = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
 
     record['model'] = {'model' : config['CLASSIFICATION_PRETRAINED_MODEL'],
@@ -408,6 +408,4 @@ def check_identifier(identifier):
         return 'scix_id'
     else:
         return 'bibcode'
-
-
 

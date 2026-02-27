@@ -26,7 +26,7 @@ TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request.json'
 
 ALLOWED_CATEGORIES = ['astrophysics', 'heliophysics', 'planetary', 'earthscience', 'NASA-funded Biophysics', 'physics', 'general', 'Text Garbage']
 # Thresholds for model checkpoint 32100
-# [Astrophysics, Heliophysics, Planetary Science, Earth Science, Biophysics, Other Physics, Other, Garbage]
+# [Astrophysics, Heliophysics, Planetary Science, earthscience, Biophysics, Other Physics, Other, Garbage]
 CLASSIFICATION_THRESHOLDS = [0.06, 0.03, 0.04, 0.02, 0.99, 0.02, 0.02, 0.99]
 ASTRONOMY_THRESHOLD_DELTA = 0.06
 HELIOPHYSICS_THRESHOLD_DELTA = 0.03
@@ -38,7 +38,6 @@ OTHER_THRESHOLD_DELTA = 0.02
 GARBAGE_THRESHOLD_DELTA = 0.0
 
 OPERATION_STEP = 'classify_verify'
-# To enable extra processing for Earth Science
+# To enable extra processing for earthscience
 ADDITIONAL_EARTH_SCIENCE_PROCESSING = False
 ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD = 0.015
-
