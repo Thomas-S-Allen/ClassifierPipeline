@@ -108,7 +108,7 @@ if __name__ == '__main__':
         collection_scores = []
         for collection in record['collections']:
 
-                # meet_threshold[categories.index('earthscience')] = True
+                # meet_threshold[categories.index('Earth Science')] = True
             collection_scores.append(record['scores'][record['categories'].index(collection)]) 
 
         # Update records

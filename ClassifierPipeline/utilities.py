@@ -46,7 +46,7 @@ def classify_record_from_scores(record):
     Post-process a classified record based on configured thresholds.
 
     Applies classification thresholds from the config file and optionally 
-    performs additional earthscience reclassification logic.
+    performs additional Earth Science reclassification logic.
 
     Parameters
     ----------
@@ -78,12 +78,12 @@ def classify_record_from_scores(record):
 
     meet_threshold = [score > threshold for score, threshold in zip(scores, thresholds)]
 
-    # Extra step to check for "earthscience" articles miscategorized as "Other"
+    # Extra step to check for "Earth Science" articles miscategorized as "Other"
     # This is expected to be less neccessary with improved training data
     if config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] == 'active':
-        logger.info('Additional earthscience Processing')
+        logger.info('Additional Earth Science Processing')
         if meet_threshold[categories.index('Other')] is True:
-            # If earthscience score above additional threshold
+            # If Earth Science score above additional threshold
             if scores[categories.index('earthscience')] \
                     > config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD']:
                 meet_threshold[categories.index('Other')] = False
@@ -408,4 +408,6 @@ def check_identifier(identifier):
         return 'scix_id'
     else:
         return 'bibcode'
+
+
 
