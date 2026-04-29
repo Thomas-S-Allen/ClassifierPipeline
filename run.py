@@ -68,6 +68,7 @@ import copy
 import itertools
 from ClassifierPipeline.tasks import (
     prepare_pre_ingest_run,
+    task_send_input_record_to_classifier,
     task_update_record,
     task_update_validated_records,
     task_index_classified_record,
@@ -311,6 +312,10 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
             try:
                 record = pre_ingest_row_to_dictionary(row, output_path=prepared_output_path)
                 record["run_id"] = run_id
+                record["status"] = i
+                record["text"] = "{} {}".format(record.get("title", ""), record.get("abstract", ""))
+                record["output_format"] = "tsv"
+                record["override"] = None
                 batch.append(record)
             except ValueError as exc:
                 raise ValueError(
@@ -321,13 +326,13 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
             if i % batch_size == 0:
                 print(f"Processing batch {i // batch_size}")
                 message = utils.list_to_ClassifyRequestRecordList(batch)
-                task_update_record.delay(message)
+                task_send_input_record_to_classifier.delay(message)
                 batch = []
 
         if batch:
             print("Processing final batch")
             message = utils.list_to_ClassifyRequestRecordList(batch)
-            task_update_record.delay(message)
+            task_send_input_record_to_classifier.delay(message)
 
 
 def queue_pre_ingest_input_text(text, output_prefix=None):
@@ -345,12 +350,16 @@ def queue_pre_ingest_input_text(text, output_prefix=None):
         {
             'title': '',
             'abstract': text,
+            'text': ' {}'.format(text),
             'operation_step': 'pre_ingest',
+            'output_format': 'tsv',
+            'override': None,
+            'status': 1,
             'run_id': run_id,
             'output_path': output_path,
         }
     ])
-    task_update_record.delay(message)
+    task_send_input_record_to_classifier.delay(message)
 
 
 def records2_fake_protobuf(record):

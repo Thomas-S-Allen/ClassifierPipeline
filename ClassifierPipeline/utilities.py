@@ -26,6 +26,7 @@ import zlib
 import csv
 import re
 import atexit
+import fcntl
 
 from google.protobuf.json_format import Parse, MessageToDict, ParseDict
 from adsmsg import ClassifyRequestRecord, ClassifyRequestRecordList, ClassifyResponseRecord, ClassifyResponseRecordList
@@ -187,6 +188,31 @@ def flush_output_file(output_path=None):
 def reset_output_buffers_for_tests():
     _OUTPUT_ROW_BUFFERS.clear()
 
+
+def _write_pre_ingest_row_once(record, row):
+    output_path = record['output_path']
+    dedupe_status = record.get('status')
+    dedupe_run_id = record.get('run_id')
+    dedupe_key = f"{dedupe_run_id}:{dedupe_status}"
+    dedupe_path = f"{output_path}.pre_ingest_seen"
+
+    with open(dedupe_path, 'a+', newline='') as seen_file:
+        fcntl.flock(seen_file.fileno(), fcntl.LOCK_EX)
+        seen_file.seek(0)
+        seen_keys = {line.rstrip('\n') for line in seen_file}
+        if dedupe_key in seen_keys:
+            fcntl.flock(seen_file.fileno(), fcntl.LOCK_UN)
+            return
+
+        with open(output_path, 'a', newline='') as output_file:
+            writer = csv.writer(output_file, delimiter='\t')
+            writer.writerow(row)
+
+        seen_file.seek(0, os.SEEK_END)
+        seen_file.write(dedupe_key + '\n')
+        seen_file.flush()
+        fcntl.flock(seen_file.fileno(), fcntl.LOCK_UN)
+
 def add_record_to_output_file(record):
     """
     Append a classified record to an existing output file.
@@ -212,6 +238,9 @@ def add_record_to_output_file(record):
 
     logger.debug(f'Writing {row}')
     output_path = record['output_path']
+    if record.get('operation_step') == 'pre_ingest' and record.get('status') is not None and record.get('run_id') is not None:
+        _write_pre_ingest_row_once(record, row)
+        return
     _OUTPUT_ROW_BUFFERS.setdefault(output_path, []).append(row)
     if len(_OUTPUT_ROW_BUFFERS[output_path]) >= _OUTPUT_BUFFER_FLUSH_EVERY:
         flush_output_file(output_path)

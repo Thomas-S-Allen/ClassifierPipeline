@@ -9,6 +9,8 @@ def _import_run_module(monkeypatch, dummy_logger):
     fake_tasks = types.ModuleType("ClassifierPipeline.tasks")
     fake_tasks.task_update_record = lambda message: None
     fake_tasks.task_update_record.delay = fake_tasks.task_update_record
+    fake_tasks.task_send_input_record_to_classifier = lambda message: None
+    fake_tasks.task_send_input_record_to_classifier.delay = fake_tasks.task_send_input_record_to_classifier
     fake_tasks.task_update_validated_records = lambda message: None
     fake_tasks.task_index_classified_record = lambda message: None
     fake_tasks.task_resend_to_master = lambda message: None
@@ -33,11 +35,11 @@ def test_batch_pre_ingest_records_skips_header(monkeypatch, dummy_logger, tmp_pa
     records = tmp_path / "pre.tsv"
     records.write_text("title\tabstract\nTitle 1\tAbstract 1\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_identifier_header_and_bibcode_rows(monkeypatch, dummy_logger, tmp_path):
@@ -46,11 +48,11 @@ def test_batch_pre_ingest_records_accepts_identifier_header_and_bibcode_rows(mon
     records = tmp_path / "pre.tsv"
     records.write_text("bibcode\ttitle\tabstract\n2022Natur.608Q.472D\tTitle 1\tAbstract 1\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"bibcode": "2022Natur.608Q.472D", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"bibcode": "2022Natur.608Q.472D", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_scix_id_rows_without_header(monkeypatch, dummy_logger, tmp_path):
@@ -59,11 +61,11 @@ def test_batch_pre_ingest_records_accepts_scix_id_rows_without_header(monkeypatc
     records = tmp_path / "pre.tsv"
     records.write_text("scix:abcd-1234-wxyz\tTitle 1\tAbstract 1\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"scix_id": "scix:abcd-1234-wxyz", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"scix_id": "scix:abcd-1234-wxyz", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_get_pre_ingest_delimiter_uses_extension_defaults(monkeypatch, dummy_logger):
@@ -104,11 +106,11 @@ def test_batch_pre_ingest_records_accepts_no_header(monkeypatch, dummy_logger, t
     records = tmp_path / "pre.tsv"
     records.write_text("Title 1\tAbstract 1\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_tsv_regression_guard(monkeypatch, dummy_logger, tmp_path):
@@ -117,7 +119,7 @@ def test_batch_pre_ingest_records_tsv_regression_guard(monkeypatch, dummy_logger
     records = tmp_path / "pre.tsv"
     records.write_text("title\tabstract\nTitle 1\tAbstract 1\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
@@ -131,11 +133,11 @@ def test_batch_pre_ingest_records_accepts_csv_with_header(monkeypatch, dummy_log
     records = tmp_path / "pre.csv"
     records.write_text("title,abstract\nTitle 1,Abstract 1\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_csv_without_header(monkeypatch, dummy_logger, tmp_path):
@@ -144,11 +146,11 @@ def test_batch_pre_ingest_records_accepts_csv_without_header(monkeypatch, dummy_
     records = tmp_path / "pre.csv"
     records.write_text("Title 1,Abstract 1\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_txt_with_sniffed_comma(monkeypatch, dummy_logger, tmp_path):
@@ -157,11 +159,11 @@ def test_batch_pre_ingest_records_accepts_txt_with_sniffed_comma(monkeypatch, du
     records = tmp_path / "pre.txt"
     records.write_text("title,abstract\nTitle 1,Abstract 1\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.txt_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.txt_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_explicit_delimiter_override(monkeypatch, dummy_logger, tmp_path):
@@ -170,11 +172,11 @@ def test_batch_pre_ingest_records_accepts_explicit_delimiter_override(monkeypatc
     records = tmp_path / "misnamed.tsv"
     records.write_text("title,abstract\nTitle 1,Abstract 1\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10, delimiter="csv")
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/misnamed.tsv_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/misnamed.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_prepares_output_once_and_reuses_output_path(monkeypatch, dummy_logger, tmp_path):
@@ -185,13 +187,15 @@ def test_batch_pre_ingest_records_prepares_output_once_and_reuses_output_path(mo
     captured = []
     prepared = []
     module.prepare_pre_ingest_run = lambda filename, proj_home_path=None: (prepared.append((filename, proj_home_path)) or (456, f"/prepared/{filename}_456_classified.tsv"))
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=1)
 
     assert prepared == [("pre.tsv", module.proj_home)]
     assert [batch[0]["output_path"] for batch in captured] == ["/prepared/pre.tsv_456_classified.tsv", "/prepared/pre.tsv_456_classified.tsv"]
     assert [batch[0]["run_id"] for batch in captured] == [456, 456]
+    assert [batch[0]["status"] for batch in captured] == [1, 2]
+    assert [batch[0]["text"] for batch in captured] == ["Title 1 Abstract 1", "Title 2 Abstract 2"]
 
 
 def test_batch_pre_ingest_records_honors_exact_batch_size_without_header(monkeypatch, dummy_logger, tmp_path):
@@ -200,7 +204,7 @@ def test_batch_pre_ingest_records_honors_exact_batch_size_without_header(monkeyp
     records = tmp_path / "pre.tsv"
     records.write_text("T1\tA1\nT2\tA2\nT3\tA3\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=2)
 
@@ -215,11 +219,11 @@ def test_batch_pre_ingest_records_treats_title_word_as_data_when_second_column_n
     records = tmp_path / "pre.tsv"
     records.write_text("title\tActually an abstract\n")
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "title", "abstract": "Actually an abstract", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"title": "title", "abstract": "Actually an abstract", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "title Actually an abstract", "output_format": "tsv", "override": None}]]
 
 
 def test_pre_ingest_row_to_dictionary_rejects_short_rows(monkeypatch, dummy_logger):
@@ -259,11 +263,11 @@ def test_queue_pre_ingest_input_text_routes_as_abstract(monkeypatch, dummy_logge
     module = _import_run_module(monkeypatch, dummy_logger)
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.queue_pre_ingest_input_text("sample body")
 
-    assert captured == [[{"title": "", "abstract": "sample body", "operation_step": "pre_ingest", "output_path": "/prepared/input-text_123_classified.tsv", "run_id": 123}]]
+    assert captured == [[{"title": "", "abstract": "sample body", "operation_step": "pre_ingest", "output_path": "/prepared/input-text_123_classified.tsv", "run_id": 123, "status": 1, "text": " sample body", "output_format": "tsv", "override": None}]]
 
 
 def test_queue_pre_ingest_input_text_uses_config_default_prefix(monkeypatch, dummy_logger):
@@ -271,7 +275,7 @@ def test_queue_pre_ingest_input_text_uses_config_default_prefix(monkeypatch, dum
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     module.config["PRE_INGEST_OUTPUT_PREFIX"] = "configured-prefix"
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.queue_pre_ingest_input_text("sample body")
 
@@ -283,7 +287,7 @@ def test_queue_pre_ingest_input_text_uses_override_prefix(monkeypatch, dummy_log
     module = _import_run_module(monkeypatch, dummy_logger)
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     captured = []
-    module.task_update_record.delay = lambda message: captured.append(message)
+    module.task_send_input_record_to_classifier.delay = lambda message: captured.append(message)
 
     module.queue_pre_ingest_input_text("sample body", output_prefix="custom-prefix")
 

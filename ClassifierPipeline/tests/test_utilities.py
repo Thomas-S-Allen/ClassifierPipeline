@@ -77,6 +77,27 @@ def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, du
     assert columns[15:17] == ["0.1", "astronomy"]
 
 
+def test_add_record_to_output_file_dedupes_pre_ingest_by_run_id_and_status(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    output = tmp_path / "out.tsv"
+    module.prepare_output_file(str(output))
+    record = {
+        "run_id": 9,
+        "status": 1,
+        "title": "Title",
+        "operation_step": "pre_ingest",
+        "collections": ["Astronomy"],
+        "collection_scores": [0.61],
+        "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
+        "output_path": str(output),
+    }
+    module.add_record_to_output_file(record)
+    module.add_record_to_output_file(record)
+    lines = output.read_text().strip().splitlines()
+    assert len(lines) == 2
+    assert lines[1].startswith("\t\t9\tTitle\tAstronomy")
+
+
 def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fake_config, dummy_logger, tmp_path):
     module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
     output = tmp_path / "out.tsv"
