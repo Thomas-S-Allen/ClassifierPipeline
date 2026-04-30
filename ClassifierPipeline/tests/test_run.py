@@ -39,7 +39,7 @@ def test_batch_pre_ingest_records_skips_header(monkeypatch, dummy_logger, tmp_pa
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_identifier_header_and_bibcode_rows(monkeypatch, dummy_logger, tmp_path):
@@ -52,7 +52,7 @@ def test_batch_pre_ingest_records_accepts_identifier_header_and_bibcode_rows(mon
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"bibcode": "2022Natur.608Q.472D", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"bibcode": "2022Natur.608Q.472D", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_scix_id_rows_without_header(monkeypatch, dummy_logger, tmp_path):
@@ -65,7 +65,7 @@ def test_batch_pre_ingest_records_accepts_scix_id_rows_without_header(monkeypatc
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"scix_id": "scix:abcd-1234-wxyz", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"scix_id": "scix:abcd-1234-wxyz", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_get_pre_ingest_delimiter_uses_extension_defaults(monkeypatch, dummy_logger):
@@ -110,7 +110,7 @@ def test_batch_pre_ingest_records_accepts_no_header(monkeypatch, dummy_logger, t
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_tsv_regression_guard(monkeypatch, dummy_logger, tmp_path):
@@ -137,7 +137,7 @@ def test_batch_pre_ingest_records_accepts_csv_with_header(monkeypatch, dummy_log
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_123_classified.tsv", "run_id": 123, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_csv_without_header(monkeypatch, dummy_logger, tmp_path):
@@ -150,7 +150,7 @@ def test_batch_pre_ingest_records_accepts_csv_without_header(monkeypatch, dummy_
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_123_classified.tsv", "run_id": 123, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_txt_with_sniffed_comma(monkeypatch, dummy_logger, tmp_path):
@@ -163,7 +163,7 @@ def test_batch_pre_ingest_records_accepts_txt_with_sniffed_comma(monkeypatch, du
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.txt_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.txt_123_classified.tsv", "run_id": 123, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_accepts_explicit_delimiter_override(monkeypatch, dummy_logger, tmp_path):
@@ -176,7 +176,7 @@ def test_batch_pre_ingest_records_accepts_explicit_delimiter_override(monkeypatc
 
     module.batch_pre_ingest_records(str(records), batch_size=10, delimiter="csv")
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/misnamed.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/misnamed.tsv_123_classified.tsv", "run_id": 123, "text": "Title 1 Abstract 1", "output_format": "tsv", "override": None}]]
 
 
 def test_batch_pre_ingest_records_prepares_output_once_and_reuses_output_path(monkeypatch, dummy_logger, tmp_path):
@@ -194,7 +194,6 @@ def test_batch_pre_ingest_records_prepares_output_once_and_reuses_output_path(mo
     assert prepared == [("pre.tsv", module.proj_home)]
     assert [batch[0]["output_path"] for batch in captured] == ["/prepared/pre.tsv_456_classified.tsv", "/prepared/pre.tsv_456_classified.tsv"]
     assert [batch[0]["run_id"] for batch in captured] == [456, 456]
-    assert [batch[0]["status"] for batch in captured] == [1, 2]
     assert [batch[0]["text"] for batch in captured] == ["Title 1 Abstract 1", "Title 2 Abstract 2"]
 
 
@@ -223,7 +222,7 @@ def test_batch_pre_ingest_records_treats_title_word_as_data_when_second_column_n
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "title", "abstract": "Actually an abstract", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "status": 1, "text": "title Actually an abstract", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"title": "title", "abstract": "Actually an abstract", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123, "text": "title Actually an abstract", "output_format": "tsv", "override": None}]]
 
 
 def test_pre_ingest_row_to_dictionary_rejects_short_rows(monkeypatch, dummy_logger):
@@ -267,7 +266,7 @@ def test_queue_pre_ingest_input_text_routes_as_abstract(monkeypatch, dummy_logge
 
     module.queue_pre_ingest_input_text("sample body")
 
-    assert captured == [[{"title": "", "abstract": "sample body", "operation_step": "pre_ingest", "output_path": "/prepared/input-text_123_classified.tsv", "run_id": 123, "status": 1, "text": " sample body", "output_format": "tsv", "override": None}]]
+    assert captured == [[{"title": "", "abstract": "sample body", "operation_step": "pre_ingest", "output_path": "/prepared/input-text_123_classified.tsv", "run_id": 123, "text": " sample body", "output_format": "tsv", "override": None}]]
 
 
 def test_queue_pre_ingest_input_text_uses_config_default_prefix(monkeypatch, dummy_logger):

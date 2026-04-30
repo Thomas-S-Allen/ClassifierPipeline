@@ -312,7 +312,6 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
             try:
                 record = pre_ingest_row_to_dictionary(row, output_path=prepared_output_path)
                 record["run_id"] = run_id
-                record["status"] = i
                 record["text"] = "{} {}".format(record.get("title", ""), record.get("abstract", ""))
                 record["output_format"] = "tsv"
                 record["override"] = None
@@ -354,7 +353,6 @@ def queue_pre_ingest_input_text(text, output_prefix=None):
             'operation_step': 'pre_ingest',
             'output_format': 'tsv',
             'override': None,
-            'status': 1,
             'run_id': run_id,
             'output_path': output_path,
         }
