@@ -29,6 +29,7 @@ import csv
 
 import ClassifierPipeline.models as models
 import ClassifierPipeline.utilities as utils
+import ClassifierPipeline.perf_metrics as perf_metrics
 from adsputils import get_date, ADSCelery, u2asc
 from contextlib import contextmanager
 from sqlalchemy import create_engine, desc, and_, or_
@@ -59,7 +60,7 @@ class SciXClassifierCelery(ADSCelery):
     - Update validated collections and handle manual overrides
     """
 
-    def index_run(self):
+    def index_run(self, perf_metrics_context_id=None):
         """
         Create and persist a new RunTable record in the database.
 
@@ -249,7 +250,7 @@ class SciXClassifierCelery(ADSCelery):
 
                 return record, "record_validated"
 
-    def query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None):
+    def query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None, perf_metrics_context_id=None):
         """
         Queries the FinalCollectionTable based on one of run_id, bibcode, or scix_id.
 
@@ -262,6 +263,16 @@ class SciXClassifierCelery(ADSCelery):
             list of dict: List of matched collection records
         """
 
+        with perf_metrics.timed_profile(
+            category="app_timing",
+            name="query_final_collection_table",
+            run_id=run_id,
+            context_id=perf_metrics_context_id,
+            config=config,
+        ):
+            return self._query_final_collection_table(run_id=run_id, bibcode=bibcode, scix_id=scix_id)
+
+    def _query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None):
         with self.session_scope() as session:
 
 
@@ -269,6 +280,8 @@ class SciXClassifierCelery(ADSCelery):
             if run_id is not None:
 
                 run_query = session.query(models.RunTable).filter(models.RunTable.id == run_id).first()
+                if run_query is None:
+                    return []
                 run_id_query = session.query(models.ScoreTable).filter(models.ScoreTable.run_id == run_query.id).all()
 
                 for record in run_id_query:
@@ -338,6 +351,5 @@ class SciXClassifierCelery(ADSCelery):
         logger.debug(f'List of validated records: {record_list}')
         return record_list, success_list
  
-
 
 

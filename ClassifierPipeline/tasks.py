@@ -34,10 +34,12 @@ Tasks:
 import sys
 import os
 import json
+import time
 import adsputils
 from adsputils import ADSCelery
 import ClassifierPipeline.app as app_module
 import ClassifierPipeline.utilities as utils
+import ClassifierPipeline.perf_metrics as perf_metrics
 from ClassifierPipeline.classifier import Classifier
 from adsputils import load_config, setup_logging
 from kombu import Queue
@@ -67,6 +69,18 @@ app.conf.CELERY_QUEUES = (
 
 classifier = Classifier()
 
+
+def _record_identifier(record):
+    if record.get("scix_id"):
+        return record.get("scix_id")
+    return record.get("bibcode")
+
+
+def _batch_context_id(records):
+    if not records:
+        return None
+    return records[0].get("perf_metrics_context_id")
+
 # ============================= TASKS ============================================= #
 
 @app.task(queue="update-record")
@@ -86,22 +100,31 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     logger.debug(f'Message type: {type(message)}')
     logger.debug(f'Message: {message}')
 
-    run_id = app.index_run()
+    request_list = utils.classifyRequestRecordList_to_list(message)
+    if not request_list:
+        logger.info("No records received by task_update_record")
+        return {"run_id": None, "records_submitted": 0}
+    context_id = _batch_context_id(request_list)
+    first_request = request_list[0]
+
+    if first_request.get("run_id") is not None:
+        run_id = first_request.get("run_id")
+    else:
+        run_id = app.index_run(perf_metrics_context_id=context_id)
     logger.info('Run ID: {}'.format(run_id))
 
-    request_list = utils.classifyRequestRecordList_to_list(message)
-
-    if 'operation_step' in request_list[0]:
-        operation_step = request_list[0]['operation_step']
+    task_start = time.perf_counter()
+    if 'operation_step' in first_request:
+        operation_step = first_request['operation_step']
     else:
         operation_step = config.get('OPERATION_STEP', 'classify_verify')
 
-    if 'output_path' in request_list[0]:
+    if 'output_path' in first_request:
         try:
-            filename = request_list[0]['output_path']
+            filename = first_request['output_path']
             filename = filename.split('/')[-1]
         except:
-            filename = request_list[0]['output_path']
+            filename = first_request['output_path']
     else:
         filename = ''
 
@@ -140,6 +163,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
                   'text': record_title + ' ' + record_abstract,
                   'operation_step': operation_step,
                   'run_id': run_id,
+                  'perf_metrics_context_id': context_id,
                   'output_format': output_format,
                   'override': None,
                   'output_path': output_path
@@ -157,6 +181,17 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
             task_send_input_record_to_classifier.delay(out_message)
         else:
             task_send_input_record_to_classifier(out_message)  
+
+    perf_metrics.emit_event(
+        stage="task_timing",
+        run_id=run_id,
+        context_id=context_id,
+        record_id=None,
+        duration_ms=(time.perf_counter() - task_start) * 1000.0,
+        status="ok",
+        extra={"name": "task_update_record", "record_count": len(request_list)},
+        config=config,
+    )
             
 
 # @app.task(queue="unclassified-queue")
@@ -172,28 +207,64 @@ def task_send_input_record_to_classifier(message):
         message (ClassifyRequestRecordList): A single-item list with record data
     """
 
+    records = utils.classifyRequestRecordList_to_list(message)
+    if not records:
+        return
+    record = records[0]
+    run_id = record.get("run_id")
+    context_id = _batch_context_id(records)
+    task_start = time.perf_counter()
+
     delay_message = config.get('DELAY_MESSAGE', False) 
 
     logger.debug("Delay set for queue messages: {}".format(delay_message))
 
     fake_data = config.get('FAKE_DATA', False) 
+    forced_fake_data = os.getenv("PERF_FORCE_FAKE_DATA")
+    if forced_fake_data is not None:
+        fake_data = forced_fake_data.strip().lower() in {"1", "true", "yes", "on", "active"}
 
     logger.debug("Fake data set for queue messages: {}".format(fake_data))
 
-    record = utils.classifyRequestRecordList_to_list(message)[0]
-
-    if fake_data is False:
-        logger.debug('Performing Inference')
-        input_text = record['title'] + ' ' + record['abstract']
-        categories, scores = classifier.batch_score_SciX_categories([input_text])
-        record['categories'] = categories[0]
-        record['scores'] = scores[0]
-        logger.debug('Categories: {}'.format(categories))
-        logger.debug('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
-        logger.debug('Scores: {}'.format(scores))
-    else:
-        logger.info('Skipping inference - generating fake data')
-        record = utils.return_fake_data(record)
+    classify_start = time.perf_counter()
+    classify_status = "error"
+    try:
+        if fake_data is False:
+            logger.debug('Performing Inference')
+            input_text = record['title'] + ' ' + record['abstract']
+            categories, scores = classifier.batch_score_SciX_categories(
+                [input_text],
+                run_id=run_id,
+                context_id=context_id,
+                configured_record_batch_size=1,
+            )
+            record['categories'] = categories[0]
+            record['scores'] = scores[0]
+            logger.debug('Categories: {}'.format(categories))
+            logger.debug('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
+            logger.debug('Scores: {}'.format(scores))
+        else:
+            logger.info('Skipping inference - generating fake data')
+            record = utils.return_fake_data(record)
+        classify_status = "ok"
+    finally:
+        perf_metrics.emit_event(
+            stage="classify",
+            run_id=run_id,
+            context_id=context_id,
+            record_id=_record_identifier(record),
+            duration_ms=(time.perf_counter() - classify_start) * 1000.0,
+            status=classify_status,
+            extra={
+                "fake_data": bool(fake_data),
+                "record_count": 1,
+                "batch_size": 1,
+                "real_record_count": 0 if fake_data else 1,
+                "fake_record_count": 1 if fake_data else 0,
+                "batch_mode": False,
+            },
+            config=config,
+        )
 
 
     logger.debug('RECORD: {}'.format(record))
@@ -211,6 +282,17 @@ def task_send_input_record_to_classifier(message):
     else:
         task_index_classified_record(out_message) 
 
+    perf_metrics.emit_event(
+        stage="task_timing",
+        run_id=run_id,
+        context_id=context_id,
+        record_id=_record_identifier(record),
+        duration_ms=(time.perf_counter() - task_start) * 1000.0,
+        status="ok",
+        extra={"name": "task_send_input_record_to_classifier", "record_count": 1},
+        config=config,
+    )
+
 
 
 
@@ -226,11 +308,18 @@ def task_index_classified_record(message):
         message (ClassifyRequestRecordList): Classified record to store
     """
 
+    records = utils.classifyRequestRecordList_to_list(message)
+    if not records:
+        return
+    record = records[0]
+    run_id = record.get("run_id")
+    context_id = _batch_context_id(records)
+    task_start = time.perf_counter()
+
     delay_message = config.get('DELAY_MESSAGE', False) 
 
     logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    record = utils.classifyRequestRecordList_to_list(message)[0]
     logger.debug(f"Record: {record}")
     logger.debug(f'Record type: {type(message)}')
 
@@ -240,8 +329,34 @@ def task_index_classified_record(message):
     if 'bibcode' in record:
         record_id = record['bibcode']
 
-    record, success = app.index_record(record)
+    index_start = time.perf_counter()
+    index_status = "error"
+    try:
+        record, success = app.index_record(record)
+        index_status = "ok"
+    finally:
+        perf_metrics.emit_event(
+            stage="index_db",
+            run_id=run_id,
+            context_id=context_id,
+            record_id=record_id,
+            duration_ms=(time.perf_counter() - index_start) * 1000.0,
+            status=index_status,
+            extra={"record_count": 1, "batch_size": 1, "batch_mode": False},
+            config=config,
+        )
     logger.debug(f'Record: {record}, Success: {success}')
+    if success in {"record_indexed", "record_validated"}:
+        perf_metrics.emit_event(
+            stage="index",
+            run_id=run_id,
+            context_id=context_id,
+            record_id=record_id,
+            duration_ms=0.0,
+            status="ok",
+            extra={"record_count": 1},
+            config=config,
+        )
     if success == "record_indexed":
         if record['operation_step'] == 'classify_verify':
             logger.info(f"Record {record_id} indexed")
@@ -259,6 +374,17 @@ def task_index_classified_record(message):
         logger.info(f"Record {record_id} sent to master")
     else:
         logger.info(f"Record {record_id} failed to be indexed")
+
+    perf_metrics.emit_event(
+        stage="task_timing",
+        run_id=run_id,
+        context_id=context_id,
+        record_id=record_id,
+        duration_ms=(time.perf_counter() - task_start) * 1000.0,
+        status="ok",
+        extra={"name": "task_index_classified_record", "record_count": 1},
+        config=config,
+    )
 
 def out_message(message):
     """

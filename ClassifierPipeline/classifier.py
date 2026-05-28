@@ -24,6 +24,7 @@ import os
 from torch import no_grad, tensor
 from adsputils import load_config, setup_logging
 from ClassifierPipeline.astrobert_classification import AstroBERTClassification
+import ClassifierPipeline.perf_metrics as perf_metrics
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 config = load_config(proj_home=proj_home)
@@ -49,6 +50,7 @@ class Classifier:
         self.classifier = AstroBERTClassification()
         self.tokenizer = self.classifier.tokenizer
         self.model = self.classifier.model
+        self.model_device = (self.classifier.runtime_metadata or {}).get("device", "cpu")
         self.labels = self.classifier.labels
         self.id2label = self.classifier.id2label
         self.label2id = self.classifier.label2id
@@ -99,7 +101,30 @@ class Classifier:
         return(split_input_ids_with_tokens)
 
         
-    def batch_score_SciX_categories(self, list_of_texts, score_combiner='max', score_thresholds=None, window_size=510,  window_stride=500):
+    def _emit_classifier_shape_metrics(self, run_id, context_id, shape_metrics):
+        for name, value in shape_metrics.items():
+            perf_metrics.emit_event(
+                stage="classifier_batch_shape",
+                run_id=run_id,
+                context_id=context_id,
+                record_id=None,
+                duration_ms=float(value),
+                extra={"name": name},
+                config=config,
+            )
+
+    def batch_score_SciX_categories(
+        self,
+        list_of_texts,
+        score_combiner='max',
+        score_thresholds=None,
+        window_size=510,
+        window_stride=500,
+        run_id=None,
+        context_id=None,
+        configured_record_batch_size=None,
+        model_inference_batch_size=None,
+    ):
         """
         Classifies each input text into SciX categories using the model.
 
@@ -125,23 +150,101 @@ class Classifier:
         logger.debug('lists of texts')
         logger.debug('List of texts {}'.format(list_of_texts))
         
-        list_of_texts_tokenized_input_ids = self.tokenizer(list_of_texts, add_special_tokens=False)['input_ids']
+        configured_batch_size = configured_record_batch_size or len(list_of_texts)
+
+        with perf_metrics.timed_profile(
+            category="classifier_timing",
+            name="tokenizer_call",
+            run_id=run_id,
+            context_id=context_id,
+            record_id=None,
+            extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+            config=config,
+        ):
+            list_of_texts_tokenized_input_ids = self.tokenizer(list_of_texts, add_special_tokens=False)['input_ids']
 
         logger.debug('Tokenized input ids')
         logger.debug('List of texts tokenized input ids {}'.format(list_of_texts_tokenized_input_ids))
 
         
         # split
-        list_of_split_input_ids = [self.input_ids_splitter(t, window_size=window_size, window_stride=window_stride) for t in list_of_texts_tokenized_input_ids]
+        with perf_metrics.timed_profile(
+            category="classifier_timing",
+            name="input_splitting",
+            run_id=run_id,
+            context_id=context_id,
+            record_id=None,
+            extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+            config=config,
+        ):
+            list_of_split_input_ids = [self.input_ids_splitter(t, window_size=window_size, window_stride=window_stride) for t in list_of_texts_tokenized_input_ids]
         # Full list of text
         # list_of_split_input_ids = input_ids_splitter(list_of_texts_tokenized_input_ids, window_size=window_size, window_stride=window_stride)
         
         logger.debug('Split input ids')
         # add special tokens
-        list_of_split_input_ids_with_tokens = [self.add_special_tokens_split_input_ids(s, self.tokenizer) for s in list_of_split_input_ids]
+        with perf_metrics.timed_profile(
+            category="classifier_timing",
+            name="special_token_padding",
+            run_id=run_id,
+            context_id=context_id,
+            record_id=None,
+            extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+            config=config,
+        ):
+            list_of_split_input_ids_with_tokens = [self.add_special_tokens_split_input_ids(s, self.tokenizer) for s in list_of_split_input_ids]
         
         logger.debug('Split input ids with tokens')
         logger.debug('List of split input ids with tokens {}'.format(list_of_split_input_ids_with_tokens))
+
+        chunk_counts = [len(split_input_ids) for split_input_ids in list_of_split_input_ids]
+        total_chunks = sum(chunk_counts)
+        max_chunks = max(chunk_counts) if chunk_counts else 0
+        max_tokenized_length = max((len(token_ids) for token_ids in list_of_texts_tokenized_input_ids), default=0)
+        max_row_widths = [
+            max((len(row) for row in split_input_ids_with_tokens), default=0)
+            for split_input_ids_with_tokens in list_of_split_input_ids_with_tokens
+        ]
+        row_token_counts = [
+            sum(len(row) for row in split_input_ids_with_tokens)
+            for split_input_ids_with_tokens in list_of_split_input_ids_with_tokens
+        ]
+        pad_ratios = []
+        for split_input_ids_with_tokens in list_of_split_input_ids_with_tokens:
+            total_tokens = sum(len(row) for row in split_input_ids_with_tokens)
+            pad_tokens = sum(
+                1
+                for row in split_input_ids_with_tokens
+                for token_id in row
+                if token_id == self.tokenizer.pad_token_id
+            )
+            pad_ratios.append((float(pad_tokens) / total_tokens) if total_tokens else 0.0)
+        self._emit_classifier_shape_metrics(
+            run_id,
+            context_id,
+            {
+                "configured_record_batch_size": configured_batch_size,
+                "model_inference_batch_size": 1,
+                "effective_chunk_batch_size": 1,
+                "total_chunks": total_chunks,
+                "mean_chunks_per_record": (float(total_chunks) / len(chunk_counts)) if chunk_counts else 0.0,
+                "max_chunks_per_record": max_chunks,
+                "max_tokenized_length": max_tokenized_length,
+                "padded_tensor_rows": max_chunks,
+                "padded_tensor_cols": max(max_row_widths, default=0),
+                "micro_batch_count": len(list_of_texts),
+                "max_micro_batch_records": 1,
+                "mean_micro_batch_records": 1.0 if list_of_texts else 0.0,
+                "max_micro_batch_rows": max_chunks,
+                "mean_micro_batch_rows": (float(total_chunks) / len(list_of_texts)) if list_of_texts else 0.0,
+                "grouping_applied": 0.0,
+                "mean_grouped_record_width": (float(sum(max_row_widths)) / len(max_row_widths)) if max_row_widths else 0.0,
+                "mean_micro_batch_token_count": (float(sum(row_token_counts)) / len(row_token_counts)) if row_token_counts else 0.0,
+                "max_micro_batch_token_count": max(row_token_counts, default=0),
+                "mean_micro_batch_pad_ratio": (float(sum(pad_ratios)) / len(pad_ratios)) if pad_ratios else 0.0,
+                "max_micro_batch_pad_ratio": max(pad_ratios, default=0.0),
+            },
+        )
         
         # list to return
         list_of_categories = []
@@ -156,27 +259,44 @@ class Classifier:
                 logger.debug('Predictions with model {}'.format(self.model))
                 try:
                     logger.debug('Really making predictions')
-                    predictions = self.model(input_ids=tensor(split_input_ids_with_tokens))
+                    with perf_metrics.timed_profile(
+                        category="classifier_timing",
+                        name="model_forward",
+                        run_id=run_id,
+                        context_id=context_id,
+                        record_id=None,
+                        extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+                        config=config,
+                    ):
+                        input_tensor = tensor(split_input_ids_with_tokens)
+                        if self.model_device and self.model_device != "cpu":
+                            input_tensor = input_tensor.to(self.model_device)
+                        predictions = self.model(input_ids=input_tensor)
+                        predictions = predictions.logits.sigmoid()
                 except Exception as e:
                     logger.exception(f'Failed with: {str(e)}')
                     raise e
-                try:
-                    logger.debug('Really making predictions - really')
-                    predictions = predictions.logits.sigmoid()
-                except Exception as e:
-                    logger.exception(f'Failed with: {str(e)}')
 
                 logger.debug('Predictions {}'.format(predictions))
                 
                 logger.debug('COmbining predictions')
                 # combine into one prediction
-                if score_combiner=='mean':
-                    prediction = predictions.mean(dim=0)
-                elif score_combiner=='max':
-                    prediction = predictions.max(dim=0)[0]
-                else:
-                    # should be a custom lambda function
-                    prediction = score_combiner(predictions)
+                with perf_metrics.timed_profile(
+                    category="classifier_timing",
+                    name="post_sigmoid_aggregation",
+                    run_id=run_id,
+                    context_id=context_id,
+                    record_id=None,
+                    extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+                    config=config,
+                ):
+                    if score_combiner=='mean':
+                        prediction = predictions.mean(dim=0)
+                    elif score_combiner=='max':
+                        prediction = predictions.max(dim=0)[0]
+                    else:
+                        # should be a custom lambda function
+                        prediction = score_combiner(predictions)
                 
 
                 logger.debug('Appending predictions')
@@ -189,4 +309,3 @@ class Classifier:
         logger.debug('Ran forward call')
         return(list_of_categories, list_of_scores)
         
-
